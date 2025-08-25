@@ -15,6 +15,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import unzipper from 'unzipper';
+import archiver from 'archiver';
 import { doExtractContentPaths } from './xwalk-content.js';
 
 export const XWALK_OPERATIONS = Object.freeze({
@@ -147,13 +148,20 @@ function isBoilerplatePackage(paths) {
     return false;
   }
 
-  // Helper function to check if a path starts with any boilerplate prefix
-  function startsWithBoilerplatePrefix(pathItem) {
-    return BOILERPLATE_PATHS.some((boilerplatePath) => pathItem.startsWith(boilerplatePath));
-  }
+  // Check if all required boilerplate paths are present
+  const hasRequiredPath = (requiredPath) => paths.some((pathItem) => pathItem === requiredPath);
+  const requiredPathsFound = BOILERPLATE_PATHS.every(hasRequiredPath);
 
-  // Check if all paths start with a prefix from BOILERPLATE_PATHS
-  return paths.every(startsWithBoilerplatePrefix);
+  // Also check if most paths are boilerplate-related (allows for additional paths)
+  const boilerplateRelatedPaths = paths.filter((pathItem) => pathItem.includes('sta-xwalk-boilerplate'));
+
+  // Consider it boilerplate if:
+  // 1. All required boilerplate paths are found, OR
+  // 2. At least 2 boilerplate-related paths are found and they make up most of the paths
+  const hasEnoughBoilerplatePaths = boilerplateRelatedPaths.length >= 2
+    && boilerplateRelatedPaths.length >= paths.length * 0.6;
+
+  return requiredPathsFound || hasEnoughBoilerplatePaths;
 }
 
 /**
@@ -194,8 +202,7 @@ async function detectBoilerplate(zipContentsPath) {
       const filterContent = fs.readFileSync(metaInfPath, 'utf8');
       core.debug(`Filter XML content: ${filterContent}`);
       extractedPaths = getFilterPaths(filterContent);
-      const pathsMessage = `✅ Extracted ${extractedPaths.length} page paths from boilerplate content: ${extractedPaths.join(', ')}`;
-      core.info(pathsMessage);
+      core.info(`✅ Extracted ${extractedPaths.length} page paths from boilerplate content: ${extractedPaths.join(', ')}`);
     } catch (error) {
       throw new Error(`Error reading filter.xml from boilerplate content: ${error.message}`);
     }
@@ -318,36 +325,33 @@ function renameFoldersInJcrRoot(jcrRootPath, repoName) {
 }
 
 /**
- * Create zip file from directory contents using unzipper
+ * Create zip file from directory contents
  * @param {string} sourceDir - Directory to zip
  * @param {string} outputPath - Path for the output zip file
  * @returns {Promise<void>}
  */
 async function createZipFromDirectory(sourceDir, outputPath) {
   return new Promise((resolve, reject) => {
-    // Use system zip command for better compatibility
-    const zipProcess = spawn('zip', ['-r', outputPath, '.'], {
-      cwd: sourceDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
+    const output = fs.createWriteStream(outputPath);
+    const archive = archiver('zip', {
+      zlib: { level: 9 }, // Sets the compression level.
     });
 
-    let errorOutput = '';
-    zipProcess.stderr.on('data', (data) => {
-      errorOutput += data.toString();
+    output.on('close', () => {
+      core.info(`✅ Created zip file: ${outputPath} (${archive.pointer()} total bytes)`);
+      resolve();
     });
 
-    zipProcess.on('close', (code) => {
-      if (code === 0) {
-        core.info(`✅ Created zip file: ${outputPath}`);
-        resolve();
-      } else {
-        reject(new Error(`Failed to create zip file: ${errorOutput}`));
-      }
+    archive.on('error', (err) => {
+      reject(err);
     });
 
-    zipProcess.on('error', (error) => {
-      reject(new Error(`Failed to start zip process: ${error.message}`));
-    });
+    archive.pipe(output);
+
+    // Add all contents of the source directory to the zip
+    archive.directory(sourceDir, false);
+
+    archive.finalize();
   });
 }
 
