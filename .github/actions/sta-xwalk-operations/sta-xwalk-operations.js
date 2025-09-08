@@ -15,13 +15,13 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import unzipper from 'unzipper';
+// eslint-disable-next-line import/no-unresolved, import/no-extraneous-dependencies
 import archiver from 'archiver';
 import { doExtractContentPaths } from './xwalk-content.js';
 
 export const XWALK_OPERATIONS = Object.freeze({
   UPLOAD: 'upload',
   GET_PAGE_PATHS: 'get-page-paths',
-  DETECT_BOILERPLATE: 'detect-boilerplate',
   CONVERT_BOILERPLATE: 'convert-boilerplate',
 });
 
@@ -149,11 +149,10 @@ function isBoilerplatePackage(paths) {
   }
 
   // Check if all paths start with any of the boilerplate paths
-  return paths.every((path) => 
-    BOILERPLATE_PATHS.some((boilerplatePath) => 
-      path.startsWith(boilerplatePath)
-    )
-  );
+  function startsWithBoilerplate(pathItem) {
+    return BOILERPLATE_PATHS.some((boilerplatePath) => pathItem.startsWith(boilerplatePath));
+  }
+  return paths.every(startsWithBoilerplate);
 }
 
 /**
@@ -487,9 +486,6 @@ async function modifyExtractedContentPackage(zipContentsPath, repoName) {
  * | *               | error_message        | Error if operation could not complete.| Output   |
  * | GET_PAGE_PATHS  | content_package_path | Path to content package zip file.     | Output   |
  * | GET_PAGE_PATHS  | page_paths           | Comma-delimited list of page paths.   | Output   |
- * | DETECT_BOILERPLATE | is_boilerplate    | Whether package is boilerplate.       | Output   |
- * | DETECT_BOILERPLATE | content_package_path | Path to content package zip file.  | Output   |
- * | DETECT_BOILERPLATE | page_paths        | Comma-delimited list of page paths.   | Output   |
  * | CONVERT_BOILERPLATE | is_boilerplate   | Whether package is boilerplate.       | Output   |
  * | CONVERT_BOILERPLATE | content_package_path | Path to content package zip file. | Output   |
  * | CONVERT_BOILERPLATE | page_paths       | Comma-delimited list of page paths.   | Output   |
@@ -544,20 +540,6 @@ export async function run() {
       }
 
       await doExtractContentPaths(zipContentsPath);
-    } else if (operation === XWALK_OPERATIONS.DETECT_BOILERPLATE) {
-      // Detect if this is a boilerplate package
-      const result = await detectBoilerplate(zipContentsPath);
-
-      // Set outputs for detection
-      core.setOutput('is_boilerplate', result.isBoilerplate.toString());
-      core.setOutput('content_package_path', result.contentPackagePath);
-      core.setOutput('page_paths', result.pagePaths.join(','));
-
-      if (result.isBoilerplate) {
-        core.info(`✅ Detected boilerplate package with ${result.pagePaths.length} paths: ${result.pagePaths.join(', ')}`);
-      } else {
-        core.info(`✅ Not a boilerplate package. Found ${result.pagePaths.length} paths: ${result.pagePaths.join(', ')}`);
-      }
     } else if (operation === XWALK_OPERATIONS.CONVERT_BOILERPLATE) {
       // First detect if this is a boilerplate package
       const result = await detectBoilerplate(zipContentsPath);
@@ -565,7 +547,7 @@ export async function run() {
       // Set detection outputs
       core.setOutput('is_boilerplate', result.isBoilerplate.toString());
       core.setOutput('content_package_path', result.contentPackagePath);
-      core.setOutput('page_paths', result.pagePaths.join(','));
+      core.setOutput('page_paths', result.pagePaths);
 
       if (result.isBoilerplate) {
         core.info(`✅ Detected boilerplate package with ${result.pagePaths.length} paths: ${result.pagePaths.join(', ')}`);
